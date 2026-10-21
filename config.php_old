@@ -1,0 +1,51 @@
+<?php
+/**
+ * FamilyFi-AI: Configuración de Servidor V1.3.4
+ * Optimizado para PWA Standalone y persistencia de sesión.
+ */
+
+date_default_timezone_set('Europe/Madrid');
+
+if (session_status() === PHP_SESSION_NONE) {
+    ini_set('session.gc_maxlifetime', 31536000); 
+    ini_set('session.cookie_httponly', 1);
+    ini_set('session.use_only_cookies', 1);
+    
+    $isSecure = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') || $_SERVER['SERVER_PORT'] == 443;
+
+    // IMPORTANTE: Samesite Lax es más compatible para Standalone si no hay HTTPS perfecto
+    session_set_cookie_params([
+        'lifetime' => 31536000,
+        'path' => '/',
+        'domain' => '', 
+        'secure' => $isSecure,
+        'httponly' => true,
+        'samesite' => 'Lax' 
+    ]);
+    
+    session_start();
+}
+
+if (!defined('DB_HOST')) {
+    define('DB_HOST', 'localhost');
+    define('DB_NAME', 'familyfi_db');
+    define('DB_USER', 'family_user'); 
+    define('DB_PASS', '1scp875^Z');     
+}
+
+function getDB() {
+    static $db = null;
+    if ($db === null) {
+        try {
+            $db = new PDO("mysql:host=".DB_HOST.";dbname=".DB_NAME.";charset=utf8", DB_USER, DB_PASS);
+            $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+            $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        } catch (PDOException $e) {
+            header('Content-Type: application/json');
+            http_response_code(500);
+            die(json_encode(["error" => "Conexión DB fallida"]));
+        }
+    }
+    return $db;
+}
+?>

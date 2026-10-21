@@ -1,0 +1,10 @@
+{
+  "description": "FamilyFi-AI: Gestión financiera inteligente para familias con IA.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "publickey-credentials-create",
+    "publickey-credentials-get"
+  ],
+  "name": "FamilyFi-AI"
+}

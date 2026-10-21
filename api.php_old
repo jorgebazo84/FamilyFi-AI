@@ -1,0 +1,134 @@
+<?php
+/**
+ * FamilyFi-AI API V1.3.4
+ * Fix definitivo para CORS y Sesiones en PWA Standalone
+ */
+
+ob_start();
+ini_set('display_errors', 0);
+error_reporting(E_ALL);
+
+require_once 'config.php';
+
+// DETECCIÓN DINÁMICA DE ORIGEN (CRÍTICO PARA PWA)
+$origin = $_SERVER['HTTP_ORIGIN'] ?? null;
+
+if ($origin && $origin !== 'null') {
+    header("Access-Control-Allow-Origin: $origin");
+} elseif (isset($_SERVER['HTTP_REFERER'])) {
+    // Si no hay Origin pero hay Referer, extraemos la base
+    $referer = parse_url($_SERVER['HTTP_REFERER']);
+    if (isset($referer['scheme']) && isset($referer['host'])) {
+        $ref_origin = $referer['scheme'] . "://" . $referer['host'];
+        header("Access-Control-Allow-Origin: $ref_origin");
+    }
+} else {
+    // Fallback de seguridad: no podemos usar '*' con credenciales
+    // Si llegamos aquí, el navegador usará Same-Origin por defecto
+}
+
+header("Access-Control-Allow-Credentials: true");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS, DELETE, PUT");
+header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, Cookie");
+header("Content-Type: application/json; charset=UTF-8");
+
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    ob_end_clean();
+    exit;
+}
+
+$action = $_GET['action'] ?? '';
+$db = getDB();
+$response = null;
+
+try {
+    if ($action === 'register') {
+        $data = json_decode(file_get_contents("php://input"), true);
+        $email = strtolower(trim($data['email'] ?? ''));
+        $password = password_hash($data['password'] ?? '', PASSWORD_DEFAULT);
+        
+        if (empty($email) || empty($data['password'])) {
+            http_response_code(400);
+            $response = ["error" => "Email y contraseña requeridos."];
+        } else {
+            $stmt = $db->prepare("INSERT INTO users (email, password) VALUES (?, ?)");
+            $stmt->execute([$email, $password]);
+            $_SESSION['user_email'] = $email;
+            $response = ["status" => "ok", "email" => $email];
+        }
+    } 
+    elseif ($action === 'login') {
+        $data = json_decode(file_get_contents("php://input"), true);
+        $email = strtolower(trim($data['email'] ?? ''));
+        
+        $stmt = $db->prepare("SELECT password FROM users WHERE email = ?");
+        $stmt->execute([$email]);
+        $user = $stmt->fetch();
+        
+        if ($user && password_verify($data['password'] ?? '', $user['password'])) {
+            $_SESSION['user_email'] = $email;
+            $response = ["status" => "ok", "email" => $email];
+        } else {
+            http_response_code(401);
+            $response = ["error" => "Credenciales incorrectas."];
+        }
+    } 
+    elseif ($action === 'check_auth') {
+        $response = [
+            "authenticated" => isset($_SESSION['user_email']),
+            "email" => $_SESSION['user_email'] ?? null
+        ];
+    } 
+    elseif ($action === 'logout') {
+        session_destroy();
+        if (isset($_COOKIE[session_name()])) {
+            setcookie(session_name(), '', time() - 42000, '/');
+        }
+        $response = ["status" => "ok"];
+    } 
+    else {
+        if (!isset($_SESSION['user_email'])) {
+            http_response_code(401);
+            $response = ["error" => "Sesión expirada."];
+        } else {
+            $user_email = $_SESSION['user_email'];
+            switch($action) {
+                case 'get_data':
+                    $stmt = $db->prepare("SELECT * FROM transactions WHERE user_email = ? ORDER BY date DESC, id DESC");
+                    $stmt->execute([$user_email]);
+                    $transactions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    $stmt = $db->prepare("SELECT data FROM settings WHERE user_email = ?");
+                    $stmt->execute([$user_email]);
+                    $settingsRow = $stmt->fetch();
+                    $response = ["transactions" => $transactions, "settings" => $settingsRow ? json_decode($settingsRow['data']) : null];
+                    break;
+                case 'save_transaction':
+                    $data = json_decode(file_get_contents("php://input"), true);
+                    $stmt = $db->prepare("INSERT INTO transactions (id, user_email, amount, description, notes, date, type, category, account, taxAmount, isDeductible) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE amount=VALUES(amount), description=VALUES(description), notes=VALUES(notes), date=VALUES(date), type=VALUES(type), category=VALUES(category), account=VALUES(account), taxAmount=VALUES(taxAmount), isDeductible=VALUES(isDeductible)");
+                    $stmt->execute([$data['id'], $user_email, $data['amount'], $data['description'], $data['notes'] ?? '', $data['date'], $data['type'], $data['category'], $data['account'] ?? 'Principal', $data['taxAmount'] ?? 0, $data['isDeductible'] ? 1 : 0]);
+                    $response = ["status" => "ok"];
+                    break;
+                case 'save_settings':
+                    $data = file_get_contents("php://input");
+                    $stmt = $db->prepare("INSERT INTO settings (user_email, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)");
+                    $stmt->execute([$user_email, $data]);
+                    $response = ["status" => "ok"];
+                    break;
+                case 'delete_transaction':
+                    $id = $_GET['id'] ?? '';
+                    $stmt = $db->prepare("DELETE FROM transactions WHERE id = ? AND user_email = ?");
+                    $stmt->execute([$id, $user_email]);
+                    $response = ["status" => "ok"];
+                    break;
+            }
+        }
+    }
+} catch (Exception $e) {
+    http_response_code(500);
+    $response = ["error" => $e->getMessage()];
+}
+
+ob_end_clean();
+echo json_encode($response);
+exit;
