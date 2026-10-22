@@ -337,8 +337,8 @@ async function startServer() {
     const distPath = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distPath));
 
-    // Fallback SPA para React Router / navegación HTML5
-    app.get('*', (req: Request, res: Response) => {
+    // Fallback SPA para React Router / navegación HTML5 (compatible con Express 5 y path-to-regexp v6+)
+    app.use((req: Request, res: Response) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
     console.log(`[Prod Server] Sirviendo estáticos desde: ${distPath}`);
